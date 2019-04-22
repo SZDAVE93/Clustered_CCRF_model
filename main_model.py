@@ -124,6 +124,8 @@ if __name__ == "__main__":
                         help='num of train days (default: 30)')
     parser.add_argument('--eval_days', type=int, default=1,
                         help='num of eval days (default: 1)')
+    # AR_days is fixed to 4, any changing with this could failed the code
+    # if what, you should first rearrange the input data based on *_y.npy
     parser.add_argument('--AR_days', type=int, default=4,
                         help='num of AutoRegreesion days (default: 4)')
     parser.add_argument('--lag_days', type=int, default=1,
