@@ -126,6 +126,8 @@ if __name__ == "__main__":
                         help='num of eval days (default: 1)')
     # AR_days is fixed to 4, any changing with this could failed the code
     # if what, you should first rearrange the input data based on *_y.npy
+    # you can figure out of the data rearranging method from the code, or
+    # comment to yifeinwpu@gmail.com to find the way to rearrange the data for different AR_days
     parser.add_argument('--AR_days', type=int, default=4,
                         help='num of AutoRegreesion days (default: 4)')
     parser.add_argument('--lag_days', type=int, default=1,
