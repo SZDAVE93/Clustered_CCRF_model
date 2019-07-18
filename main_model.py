@@ -2,7 +2,6 @@
 """
 Created on Wed Dec  5 21:36:44 2018
 
-delete here again
 @author: szdave
 """
 import os
