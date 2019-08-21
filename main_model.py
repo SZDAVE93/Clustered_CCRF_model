@@ -5,7 +5,6 @@ Created on Wed Dec  5 21:36:44 2018
 @author: szdave
 """
 import os
-import models
 import CCRF
 import numpy as np
 import build_relation_y2y
@@ -105,13 +104,42 @@ def clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days
     
     return RMSE, Predicts, Reals
 
+def subgraphs2matrix(m_subgraphs, num_regions):
+    
+    matrix = np.zeros([num_regions, num_regions])
+    for subgraph in m_subgraphs:
+        for edge in subgraph.edges:
+            matrix[edge[0], edge[1]] = 1
+    
+    num_zeros = len(np.where(matrix == 0)[0])
+    print("zeros ratio:\t{}".format(num_zeros / num_regions**2))
+    return matrix
+
+def fully2partial(CCRF_S, partial_matrix):
+    
+    t = CCRF_S.shape[0]
+    num_regions = CCRF_S.shape[1]
+    new_CCRF_S = np.zeros([t, n, n])
+    for i in range(0, t):
+        new_CCRF_S[i] = CCRF_S[i] * partial_matrix
+    return new_CCRF_S
+    
+def build_static_S(similarity, CCRF_S):
+    
+    t = CCRF_S.shape[0]
+    n = CCRF_S.shape[1]
+    new_CCRF_S = np.zeros([t, n, n])
+    for i in range(0, t):
+        new_CCRF_S[i] = similarity
+    return new_CCRF_S
+
 def cluster_tree(child_num, tree_level, similarity, m_type, is_asc):
     
     m_cliques, m_number, m_subgraphs = tree_structure_clustering.discover_trees(similarity, 
                                                                                 child_num, 
                                                                                 tree_level, m_type, 
                                                                                 is_asc)    
-    return m_cliques
+    return m_cliques, m_subgraphs
 
 
 if __name__ == "__main__":
@@ -120,9 +148,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--start_date', type=int, default=400,
                         help='date of start day (default: 400)')
-    parser.add_argument('--train_days', type=int, default=30,
+    parser.add_argument('--train_days', type=int, default=60,
                         help='num of train days (default: 30)')
-    parser.add_argument('--eval_days', type=int, default=1,
+    parser.add_argument('--eval_days', type=int, default=30,
                         help='num of eval days (default: 1)')
     # AR_days is fixed to 4, any changing with this could failed the code
     # if what, you should first rearrange the input data based on *_y.npy
@@ -149,26 +177,49 @@ if __name__ == "__main__":
     # tree-clustering parameters
     is_asc = True # indicating whether select the node in asc order or not
     m_type = 0 # 0 for degree based; 1 for edge based
-    simi_len = 200 # used to specify the similarity between regions and then to cluster
+    simi_len = 300 # used to specify the similarity between regions and then to cluster
     crime_type = ["person", "property"]
     city_name = ["NY", "CHI"]
     crime_ID = 0
-    city_ID = 0
+    city_ID = 1
+    
+    # CCRF_S parameter
+    is_partial = False
+    is_static = True
     
     
     path = os.getcwd()
     CCRF_X = np.load(path + '/data/' + city_name[city_ID] + '/' + crime_type[crime_ID] + '_x.npy')
     CCRF_Y = np.load(path + '/data/' + city_name[city_ID] + '/' + crime_type[crime_ID] + '_y.npy')
     CCRF_S = np.load(path + '/data/' + city_name[city_ID] + '/' + crime_type[crime_ID] + '_s.npy')
+    n = CCRF_S.shape[1]
     # evaluation on different start_date
-    for start_date in range(500, 600, 10):
+    for start_date in range(500, 600, 30):
         print("child_num:\t%d\ttree_level:\t%d" % (child_num, tree_level))
         similarity = build_relation_y2y.build_data_S(CCRF_Y[:, start_date-simi_len:start_date])[-1]
-        m_cliques = cluster_tree(child_num, tree_level, similarity.copy(), m_type, is_asc)
+        m_cliques, m_subgraphs = cluster_tree(child_num, tree_level, similarity.copy(), m_type, is_asc)
+        
+        if is_static:
+            CCRF_S = build_static_S(similarity, CCRF_S)
+        
+        if is_partial:
+            num_regions = similarity.shape[0]
+            partial_matrix = subgraphs2matrix(m_subgraphs, num_regions)
+            p_CCRF_S = fully2partial(CCRF_S.copy(), partial_matrix)
+        else:
+            p_CCRF_S = CCRF_S.copy()
+        
         Eval_sets, paras_alpha, paras_beta = clustered_CCRF_train(m_cliques, start_date, train_days, 
-                                                                  eval_days, CCRF_X, CCRF_Y, CCRF_S, lag_days)
+                                                                  eval_days, CCRF_X, CCRF_Y, p_CCRF_S, lag_days)
         # P represents the predicted values
         # R represents the real values
         rmse, P, R = clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days)
-        print("RMSE:\t%.5f" % rmse)
+        print("Clustered_CCRF\tRMSE:\t%.5f" % rmse)
+        m_cliques = []
+        m_cliques.extend([np.arange(n)])
+        Eval_sets, paras_alpha, paras_beta = clustered_CCRF_train(m_cliques, start_date, train_days, 
+                                                                  eval_days, CCRF_X, CCRF_Y, p_CCRF_S, lag_days)
+        rmse, P, R = clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days)
+        print("CCRF\tRMSE:\t%.5f" % rmse)
+        
     

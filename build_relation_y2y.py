@@ -7,12 +7,12 @@ Created on Fri Feb 23 10:54:50 2018
 
 import numpy as np
 
-def KL_distance(raw_p, raw_q):
+def KL_distance(raw_p, raw_q, max_value):
     '''
     calculate KL divergence bewteen dataset p and q
     '''
     # re-orgnize the raw data
-    m_bins = [x for x in range(0, 101, 5)]
+    m_bins = [x for x in range(0, max_value+5, 1)]
     # to prevent 0 items, manully add 0.1
     freq_p = np.histogram(raw_p, bins=m_bins)[0] + 0.1
     freq_q = np.histogram(raw_q, bins=m_bins)[0] + 0.1
@@ -36,7 +36,8 @@ def build_data_S(CCRF_Y):
     for k in range(t-1, t):
         for i in range(0, n):
             for j in range(i, n):
-                temp = KL_distance(CCRF_Y[i, 0:k], CCRF_Y[j, 0:k])
+                tmp_max = np.max([np.max(CCRF_Y[i, 0:k]), np.max(CCRF_Y[j, 0:k])]).astype(int)
+                temp = KL_distance(CCRF_Y[i, 0:k], CCRF_Y[j, 0:k], tmp_max)
                 CCRF_S[k, i, j] = temp
                 CCRF_S[k, j, i] = CCRF_S[k, i, j]
         # make sure that S_{i, j} = 0
