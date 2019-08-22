@@ -278,9 +278,9 @@ def build_data_x2y(X, M, tag, ar_days):
     end_date = 365*3
     AR_days = ar_days # how many historical days are used to predict, here we take 7 days into account
     
-    #X_all_1 = np.sum(X[start_date:end_date], axis=2)
+    X_all_1 = np.sum(X[start_date:end_date], axis=2)
     
-    X_all_1 = X.copy()
+    #X_all_1 = X.copy()
     t, n = X_all_1.shape
     num_data = end_date - AR_days
     
@@ -294,7 +294,7 @@ def build_data_x2y(X, M, tag, ar_days):
         CCRF_X = AR_train_all[:, :, 0:AR_days]
         CCRF_Y = AR_train_all[:, :, AR_days].T
     else:
-        # consider mobility feature from M as well
+        # consider region mobility feature from M as well
         CCRF_X = AR_train_all[:, :, 0:AR_days]
         CCRF_Y = AR_train_all[:, :, AR_days].T
         m_start = 27
