@@ -144,6 +144,7 @@ def discover_trees(similarity, child_num, tree_level, m_type, is_asc):
     
     # build the graph    
     m_graph = buildGraph(similarity, n, threshold)
+    print(m_graph.number_of_edges())
     # sort nodes w.r.t degree
     region_degree = np.zeros([1, n])
     t_nodes = [x for x in range(0, n)]

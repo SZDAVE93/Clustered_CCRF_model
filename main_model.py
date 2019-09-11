@@ -7,7 +7,7 @@ Created on Wed Dec  5 21:36:44 2018
 import os
 import CCRF
 import numpy as np
-import build_relation_y2y
+import functions
 import tree_structure_clustering
 
 def tuning_model(CCRF_X, CCRF_Y, CCRF_S, max_iter, 
@@ -19,8 +19,8 @@ def tuning_model(CCRF_X, CCRF_Y, CCRF_S, max_iter,
     '''
     init_alpha = 4
     init_beta = 4
-    end_alpha = 8
-    end_beta = 8
+    end_alpha = 12
+    end_beta = 12
     best_alpha = None
     best_beta = None
     # orgnize train and eval dataset
@@ -45,7 +45,7 @@ def clustered_CCRF_train(m_cliques, start_date, train_days, eval_days, CCRF_X, C
 
     print(start_date)
     Multi_beta = False
-    max_iter = 10
+    max_iter = 1
     n_cluster = len(m_cliques)
     likelihood = 0
     print("Separated Tuning......")
@@ -87,6 +87,7 @@ def clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days
     print("# of areas:\t%d" % n)
     Predicts = np.zeros([n, eval_days])
     Reals = np.zeros([n, eval_days])
+    pred_y_all = np.zeros([n, eval_days])
     
     print("# of clusters:\t%d" % n_clusters)
     for cluster_id in range(0, n_clusters):
@@ -96,41 +97,22 @@ def clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days
         e_ccrf_s = Eval_sets[cluster_id][2]
         alpha = paras_alpha[:, cluster_id].reshape([AR_days, 1])
         beta = paras_beta[cluster_id]
+        iter_x = e_ccrf_x[0]
+        num_regions, seq_len = iter_x.shape
+        pred_y = np.zeros([len(clique), 1])
         for i in range(0, eval_days):
             predict_Y = CCRF.predict(e_ccrf_x[i], e_ccrf_s[i], alpha, beta, Multi_beta)
             Predicts[clique, i] = predict_Y[:, 0]
             Reals[clique, i] = e_ccrf_y[:, i]
+            pred_y_tmp = CCRF.predict(iter_x, e_ccrf_s[i], alpha, beta, Multi_beta)
+            pred_y = np.append(pred_y, pred_y_tmp, axis=1)
+            iter_x = np.append(iter_x[:, 1:seq_len], pred_y_tmp, axis=1)
+        pred_y = pred_y[:, 1:eval_days+1]
+        pred_y_all[clique, :] = pred_y
     RMSE = np.sqrt(np.sum((Predicts - Reals)**2) / n / eval_days)
+    RMSE_iter = np.sqrt(np.sum((pred_y_all - Reals)**2) / n / eval_days)
     
-    return RMSE, Predicts, Reals
-
-def subgraphs2matrix(m_subgraphs, num_regions):
-    
-    matrix = np.zeros([num_regions, num_regions])
-    for subgraph in m_subgraphs:
-        for edge in subgraph.edges:
-            matrix[edge[0], edge[1]] = 1
-    
-    num_zeros = len(np.where(matrix == 0)[0])
-    print("zeros ratio:\t{}".format(num_zeros / num_regions**2))
-    return matrix
-
-def fully2partial(CCRF_S, partial_matrix):
-    
-    t = CCRF_S.shape[0]
-    num_regions = CCRF_S.shape[1]
-    new_CCRF_S = np.zeros([t, n, n])
-    for i in range(0, t):
-        new_CCRF_S[i] = CCRF_S[i] * partial_matrix
-    return new_CCRF_S
-    
-def build_static_S(similarity, CCRF_Y):
-    
-    n, t = CCRF_Y.shape
-    new_CCRF_S = np.zeros([t, n, n])
-    for i in range(0, t):
-        new_CCRF_S[i] = similarity
-    return new_CCRF_S
+    return RMSE, RMSE_iter, Predicts, pred_y, Reals
 
 def cluster_tree(child_num, tree_level, similarity, m_type, is_asc):
     
@@ -145,24 +127,24 @@ if __name__ == "__main__":
     
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--start_date', type=int, default=500,
+    parser.add_argument('--start_date', type=int, default=750,
                         help='date of start day (default: 400)')
-    parser.add_argument('--train_days', type=int, default=60,
-                        help='num of train days (default: 30)')
-    parser.add_argument('--eval_days', type=int, default=30,
+    parser.add_argument('--train_days', type=int, default=180,
+                        help='num of train days (default: 180)')
+    parser.add_argument('--eval_days', type=int, default=14,
                         help='num of eval days (default: 1)')
-    # AR_days is fixed to 4, any changing with this could failed the code
-    # if what, you should first rearrange the input data based on *_y.npy
-    # you can figure out of the data rearranging method from the code, or
-    # comment to yifeinwpu@gmail.com to find the way to rearrange the data for different AR_days
     parser.add_argument('--AR_days', type=int, default=7,
                         help='num of AutoRegreesion days (default: 4)')
     parser.add_argument('--lag_days', type=int, default=1,
                         help='num of lag days (default: 1)')
-    parser.add_argument('--child_num', type=int, default=3,
+    parser.add_argument('--child_num', type=int, default=5,
                         help='num of child (default: 3)')
-    parser.add_argument('--tree_level', type=int, default=7,
+    parser.add_argument('--tree_level', type=int, default=3,
                         help='num of tree level (default: 4)')
+    parser.add_argument('--is_fullPartial', type=int, default=1,
+                        help='whether to partial the matrix 1/0')
+    parser.add_argument('--simi_len', type=int, default=90,
+                        help='build similarity matrix between regions')
     args = parser.parse_args()
     start_Date = args.start_date
     train_days = args.train_days
@@ -176,15 +158,14 @@ if __name__ == "__main__":
     # tree-clustering parameters
     is_asc = True # indicating whether select the node in asc order or not
     m_type = 0 # 0 for degree based; 1 for edge based
-    simi_len = 300 # used to specify the similarity between regions and then to cluster
+    simi_len = args.simi_len # used to specify the similarity between regions and then to cluster
     crime_type = ["person", "property"]
     city_name = ["NY", "CHI"]
     crime_ID = 0
     city_ID = 1
     
     # CCRF_S parameter
-    is_partial = False
-    is_static = True
+    is_fullPartial = args.is_fullPartial
     
     # load existing training dataset
     '''
@@ -200,55 +181,44 @@ if __name__ == "__main__":
     X = np.load(path + '/data/' + city_name[city_ID] + '/raw/crime_record.npy')
     M = np.load(path + '/data/' + city_name[city_ID] + '/raw/region_factors.npy')
     m_tag = 0 # not using M(region factors) as input factors
-    CCRF_X, CCRF_Y = CCRF.build_data_x2y(X, M, m_tag, AR_days)
+    CCRF_X, CCRF_Y = CCRF.build_data_x2y_new(X, m_tag, AR_days)
     n = CCRF_Y.shape[0]
     
-    if not is_static:
-        CCRF_S = CCRF.build_data_S(CCRF_Y)
-    
-    clustered_rmse = 0
-    raw_rmse = 0
-    k = 0
-    file = open(path + '/data/results/tmp_results.txt', 'a+')
-    # evaluation on different start_date
-    for start_date in range(start_Date, start_Date + 100, 30):
-        print("child_num:\t%d\ttree_level:\t%d" % (child_num, tree_level))
-        similarity = build_relation_y2y.build_data_S(CCRF_Y[:, start_date-simi_len:start_date])[-1]
-        m_cliques, m_subgraphs = cluster_tree(child_num, tree_level, similarity.copy(), m_type, is_asc)
-        
-        if is_static:
-            CCRF_S = build_static_S(similarity, CCRF_Y)
-        
-        if is_partial:
-            num_regions = similarity.shape[0]
-            partial_matrix = subgraphs2matrix(m_subgraphs, num_regions)
-            p_CCRF_S = fully2partial(CCRF_S.copy(), partial_matrix)
-        else:
-            p_CCRF_S = CCRF_S.copy()
-        
-        Eval_sets, paras_alpha, paras_beta = clustered_CCRF_train(m_cliques, start_date, train_days, 
-                                                                  eval_days, CCRF_X, CCRF_Y, p_CCRF_S, lag_days)
-        # P represents the predicted values
-        # R represents the real values
-        rmse, P, R = clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days)
-        print("Clustered_CCRF\tRMSE:\t%.5f" % rmse)
-        clustered_rmse = clustered_rmse + rmse
-        m_cliques = []
-        m_cliques.extend([np.arange(n)])
-        Eval_sets, paras_alpha, paras_beta = clustered_CCRF_train(m_cliques, start_date, train_days, 
-                                                                  eval_days, CCRF_X, CCRF_Y, p_CCRF_S, lag_days)
-        rmse, P, R = clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days)
-        print("CCRF\tRMSE:\t%.5f" % rmse)
-        raw_rmse = raw_rmse + rmse
-        k = k + 1
-    print("child_num:\t%d\ttree_level:\t%d" % (child_num, tree_level))
-    print("AVE Clustered_CCRF RMSE:\t{.5f}".format(clustered_rmse / k))
-    print("AVE Raw_CCRF RMSE:\t{.5f}".format(clustered_rmse / k))
-    file.write("Start_date:\t{}\n".format(start_Date))
-    file.write("AR_days:\t{}\n".format(AR_days))
-    file.write("child_num:\t%d\ntree_level:\t%d\n" % (child_num, tree_level))
-    file.write("AVE Clustered_CCRF RMSE:\t{.5f}\n".format(clustered_rmse / k))
-    file.write("AVE Raw_CCRF RMSE:\t{.5f}\n".format(clustered_rmse / k))
+    if is_fullPartial == 1:
+        file = open(path + '/data/results/partial/results_{}_{}.txt'.format(simi_len, eval_days), 'a+')
+    else:
+        file = open(path + '/data/results/non_partial/results_{}_{}.txt'.format(simi_len, eval_days), 'a+')
+    # evaluation on different clustering parameters
+    for child_num in range(2, 6):
+        for tree_level in range(2, 6):
+            print("child_num:\t%d\ttree_level:\t%d" % (child_num, tree_level))
+            similarity = functions.build_data_Static_S(CCRF_Y[:, start_Date-simi_len:start_Date])
+            CCRF_S = functions.transfer_static_S(similarity, CCRF_Y.shape[1])
+            
+            m_cliques, m_subgraphs = cluster_tree(child_num, tree_level, similarity.copy(), m_type, is_asc)
+            m_modularity, m_graph = functions.clique_modularity(m_cliques, similarity.copy(), 2)
+            m_entropy = functions.clique_entropy(m_cliques, CCRF_Y[:, start_Date-train_days:start_Date])
+            
+            if is_fullPartial == 1:
+                print("# of edges:\t{}".format(m_graph.number_of_edges()))
+                p_CCRF_S, zero_ratio = functions.fully2partial(CCRF_S.copy(), m_graph)
+            else:
+                zero_ratio = 0
+                p_CCRF_S = CCRF_S.copy()
+            
+            Eval_sets, paras_alpha, paras_beta = clustered_CCRF_train(m_cliques, start_Date, train_days, 
+                                                                      eval_days, CCRF_X, CCRF_Y, p_CCRF_S, lag_days)
+            # P represents the predicted values
+            # R represents the real values
+            c_rmse, c_rmse_iter, P, P_y, R = clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days)
+            print("Clustered_CCRF\tRMSE:\t%.5f" % c_rmse)
+            print("Clustered_CCRF\tRMSE_iter:\t%.5f" % c_rmse_iter)
+            file.write("{}\t{}\t{}\t{}\t{:.5f}\t{:.5f}\t{:.5f}\t{:.5f}\t{:.5f}\n".format(start_Date, child_num, tree_level, len(m_cliques), 
+                                                                                     m_modularity, m_entropy, zero_ratio, 
+                                                                                     c_rmse, c_rmse_iter))
     file.close()
+    
+    
+    
         
     

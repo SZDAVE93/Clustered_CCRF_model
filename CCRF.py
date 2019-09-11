@@ -4,7 +4,7 @@ Created on Thu Feb  8 22:28:09 2018
 
 @author: szdave
 """
-
+import os
 import numpy as np
 import scipy.spatial.distance as dist
 
@@ -19,7 +19,10 @@ def calculate_gradient_alpha(X, Y, S, log_alpha, k_th, A, b):
     alpha = np.exp(log_alpha)
     inv_A = np.zeros([t, n, n])
     for i in range(0, t):
-        inv_A[i] = np.linalg.inv(A[i])
+        try:
+            inv_A[i] = np.linalg.inv(A[i])
+        except:
+            inv_A[i] = np.linalg.pinv(A[i])
     I = np.eye(n).flatten().reshape([n**2, 1])
     for i in range(0, t):
         term_1 = np.sum((Y[:, i].reshape([n, 1]) - X[i, :, k_th])**2)
@@ -55,7 +58,10 @@ def calculate_gradient_beta(X, Y, S, log_beta, k_th, A, b):
     beta = np.exp(log_beta)
     inv_A = np.zeros([t, n, n])
     for i in range(0, t):
-        inv_A[i] = np.linalg.inv(A[i])
+        try:
+            inv_A[i] = np.linalg.inv(A[i])
+        except:
+            inv_A[i] = np.linalg.pinv(A[i])
     #I = np.eye(n).flatten().reshape([n**2, 1])
     gradient = 0
     for i in range(0, t):
@@ -91,7 +97,10 @@ def do_gradient_beta(X, Y, S, log_beta, A, b, Multi_b):
         beta = np.exp(log_beta)
         inv_A = np.zeros([t, n, n])
         for i in range(0, t):
-            inv_A[i] = np.linalg.inv(A[i])
+            try:
+                inv_A[i] = np.linalg.inv(A[i])
+            except:
+                inv_A[i] = np.linalg.pinv(A[i])
         #I = np.eye(n).flatten().reshape([n**2, 1])
         gradient = 0
         for i in range(0, t):
@@ -172,7 +181,6 @@ def calculate_likelihood(X_t, Y_t, S_t, log_alpha, log_beta, A_t, b_t):
         inv_A_t = np.linalg.pinv(A_t)
     Z_t = (np.linalg.det(2*A_t))**(-1/2) * np.exp(np.dot(np.dot(b_t.T, inv_A_t), b_t) - Z_t_c)
     Z_t = (2*np.pi)**(n/2) * Z_t
-    #print(Z_t)
     term_3 = - np.log(Z_t)
     
     #print("Term_1:\t%.5f" % term_1)
@@ -255,7 +263,10 @@ def predict(X_t, S_t, alpha, beta, Multi_beta):
         #temp = np.diag(np.sum(beta * S_t, axis=0))
         term_2 = beta * D_S# + temp
         A = term_1 + term_2
-        inv_A = np.linalg.inv(A)
+        try:
+            inv_A = np.linalg.inv(A)
+        except:
+            inv_A = np.linalg.pinv(A)
         predict_Y = np.dot(inv_A, np.dot(X_t, alpha))
     else:
         # predict use one b
@@ -265,10 +276,42 @@ def predict(X_t, S_t, alpha, beta, Multi_beta):
         term_1 = np.sum(alpha) * np.eye(n)
         term_2 = beta * D_S
         A = term_1 + term_2
-        inv_A = np.linalg.inv(A)
+        try:
+            inv_A = np.linalg.inv(A)
+        except:
+            inv_A = np.linalg.pinv(A)
         predict_Y = np.dot(inv_A, np.dot(X_t, alpha))
     
     return predict_Y
+
+def build_data_x2y_new(X, tag, ar_days):
+    
+    start_date = 0
+    end_date = 365*3
+    AR_days = ar_days
+    
+    X_all = np.sum(X[start_date:end_date], axis=2)
+    t, n = X_all.shape
+    if tag == 0: # only near historical data
+        num_data = end_date - AR_days
+        AR_train_all = np.zeros([num_data, n, AR_days+1])
+        for i in range(AR_days, end_date):
+            temp = X_all[i-AR_days:i+1, :].T
+            AR_train_all[i-AR_days] = temp
+        CCRF_X = AR_train_all[:, :, 0:AR_days]
+        CCRF_Y = AR_train_all[:, :, AR_days].T
+    else: # with long term historical data
+        num_data = end_date - AR_days - 2 * 7
+        AR_train_all = np.zeros([num_data, n, AR_days+1+2])
+        for i in range(AR_days + 2*7, end_date):
+            temp = X_all[i-AR_days:i+1, :].T
+            temp_long = X_all[[i-14, i-21], :].T
+            temp_long = np.append(temp_long, temp, axis=1)
+            AR_train_all[i-AR_days-2*7] = temp_long
+        CCRF_X = AR_train_all[:, :, 0:AR_days+2]
+        CCRF_Y = AR_train_all[:, :, AR_days+2].T
+    print(CCRF_X.shape)
+    return CCRF_X, CCRF_Y
 
 def build_data_x2y(X, M, tag, ar_days):
     '''
@@ -330,86 +373,25 @@ def build_data_S(CCRF_Y):
         # make sure that S_{i, j} = 0
         #CCRF_S[k] = CCRF_S[k] - I
     
-    return CCRF_S
+    return CCRF_S    
 
-def build_data_trai_eval(CCRF_X, CCRF_Y, CCRF_S, train_start, train_days, eval_days, lag_days):
+def build_data_trai_eval(CCRF_X, CCRF_Y, CCRF_S, train_end, train_days, eval_days, lag_days):
     '''
     build train and eval dataset
     '''
     
     #lag_days = 14 # decide how to apply CCRF_S
     #print("lag_days:%d" % lag_days)
-    eval_start = train_start
+    eval_start = train_end
     
     # train set
-    T_CCRF_X = CCRF_X[train_start-train_days:train_start]
-    T_CCRF_Y = CCRF_Y[:, train_start-train_days:train_start]
-    T_CCRF_S = CCRF_S[train_start-lag_days-train_days:train_start-lag_days]
+    T_CCRF_X = CCRF_X[train_end-train_days:train_end]
+    T_CCRF_Y = CCRF_Y[:, train_end-train_days:train_end]
+    T_CCRF_S = CCRF_S[train_end-lag_days-train_days:train_end-lag_days]
     
     # eval set
     E_CCRF_X = CCRF_X[eval_start:eval_start+eval_days]
-    E_CCRF_Y = CCRF_Y[:, eval_start:eval_start+eval_days]
+    E_CCRF_Y = CCRF_Y[:, eval_start-1:eval_start+eval_days]
     E_CCRF_S = CCRF_S[eval_start-lag_days:eval_start-lag_days+eval_days]
     
     return (T_CCRF_X, T_CCRF_Y, T_CCRF_S), (E_CCRF_X, E_CCRF_Y, E_CCRF_S)
-
-def eval_model(CCRF_X, CCRF_Y, CCRF_S, max_iter, learn_rate, train_start, train_days, eval_days, dynamic, init_alpha, init_beta, Multi_beta):
-    '''
-    evaluate model with some experiment settings
-    '''
-    #Multi_beta = False
-    #print("##CCRF model performance:")
-    time = 0
-    if dynamic > 1:
-        #print("Only predict next day and train model with moving window")
-        eval_days = 1
-        time = dynamic
-    else:
-        #print("Predict next %d days with model trained using previous days" % eval_days)
-        time = 1
-    for i in range(train_start, train_start+time):
-        # orgnize train and eval dataset
-        Train_sets, Eval_sets = build_data_trai_eval(CCRF_X, CCRF_Y, CCRF_S, i, train_days, eval_days)
-        t_ccrf_x = Train_sets[0]
-        t_ccrf_y = Train_sets[1]
-        t_ccrf_s = Train_sets[2]
-        e_ccrf_x = Eval_sets[0]
-        e_ccrf_y = Eval_sets[1]
-        e_ccrf_s = Eval_sets[2]
-        # train model
-        alpha, beta, t_likelihood = fit_model(t_ccrf_x, t_ccrf_y, t_ccrf_s, max_iter, learn_rate, Multi_beta, init_alpha, init_beta)
-        n = t_ccrf_y.shape[0]
-        predicts = np.zeros([n, eval_days])
-        RSME = 0
-        # evaluate with future data
-        for i in range(0, eval_days):
-            predict_Y = predict(e_ccrf_x[i], e_ccrf_s[i], alpha, beta, Multi_beta)
-            predicts[:, i] = predict_Y[:, 0]
-            rsme = np.sum((predict_Y - e_ccrf_y[:, i].reshape([n, 1]))**2) / n
-            #print("Day\t%d\tRSME:\t%.5f" % (i, np.sqrt(rsme)))
-            RSME = RSME + rsme
-        for i in range(0, n):
-            rsme = np.sqrt(np.sum((predicts[i, :] - e_ccrf_y[i, :].reshape([1, eval_days]))**2) / eval_days)
-            #print("Region\t%d\tRSME:\t%.5f" % (i, rsme))
-    #print("Overall RSME:\t%.5f" % np.sqrt(RSME / eval_days))
-    return RSME
-    #print(alpha)
-    #print(beta)
-   
-if __name__ == "__main__":
-    
-    '''
-    max_iter = int(1e4)
-    learn_rate = 1e-6
-    train_start = 30
-    train_days = 30
-    eval_days = 10
-    mobility = 0
-    dynamic = 1
-    
-    CCRF_X, CCRF_Y = build_data_x2y(X, M, mobility)
-    CCRF_S = build_data_S(CCRF_Y)
-    eval_model(CCRF_X, CCRF_Y, CCRF_S, max_iter, learn_rate, train_start, train_days, eval_days, dynamic)
-    '''
-    
-    W_CCRF_RNN_X, W_CCRF_RNN_Y = build_data_x2y(A_crime_data_week, A_311_data_week, 1, 7)
