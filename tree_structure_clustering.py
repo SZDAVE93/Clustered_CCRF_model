@@ -119,7 +119,7 @@ def select_node(m_graph, nodes, node_degree, m_similarity, m_type, is_asc):
         
 
 
-def discover_trees(similarity, child_num, tree_level, m_type, is_asc):
+def discover_trees(similarity, child_num, tree_level, m_type, is_asc, var_weight):
     '''
     build tree-structured clusters
     '''
@@ -139,7 +139,7 @@ def discover_trees(similarity, child_num, tree_level, m_type, is_asc):
     n_cluster = 0
     m_subgraphs = []
     clusters = []
-    var_weight = 2
+    #var_weight = 2
     threshold = np.mean(similarity_backup) + var_weight * np.var(similarity_backup)
     
     # build the graph    

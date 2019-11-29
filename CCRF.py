@@ -9,7 +9,7 @@ import numpy as np
 import scipy.spatial.distance as dist
 
 
-def calculate_gradient_alpha(X, Y, S, log_alpha, k_th, A, b):
+def calculate_gradient_alpha(X, Y, S, log_alpha, k_th, A, b, reg=False, reg_lambda=1e-2):
     '''
     get k-th gradient for k-th log_alpha
     '''
@@ -32,12 +32,17 @@ def calculate_gradient_alpha(X, Y, S, log_alpha, k_th, A, b):
         term_5 = np.dot(np.dot(b[:, i].reshape([n, 1]).T, inv_A[i]), X[i, :, k_th].reshape([n, 1]))
         term_6 = - np.sum((X[i, :, k_th].reshape([n, 1]))**2)
         gradient = gradient + term_1 + term_2 + term_3 + term_4 + term_5 + term_6
-    gradient = - alpha[k_th] * gradient
+    # here is the l2 regularization term
+    if reg == True:
+        term_reg = 2 * reg_lambda * alpha[k_th]
+    else:
+        term_reg = 0
+    gradient = - alpha[k_th] * (gradient + term_reg)
     
     return gradient
 
 
-def do_gradient_alpha(X, Y, S, log_alpha, A, b):
+def do_gradient_alpha(X, Y, S, log_alpha, A, b, reg, reg_lambda):
     '''
     graident for each log_alpha
     '''
@@ -45,11 +50,11 @@ def do_gradient_alpha(X, Y, S, log_alpha, A, b):
     gradients = np.zeros([m, 1])
     
     for i in range(0, m):
-        gradients[i] = calculate_gradient_alpha(X, Y, S, log_alpha, i, A, b)
+        gradients[i] = calculate_gradient_alpha(X, Y, S, log_alpha, i, A, b, reg, reg_lambda)
     
     return gradients
 
-def calculate_gradient_beta(X, Y, S, log_beta, k_th, A, b):
+def calculate_gradient_beta(X, Y, S, log_beta, k_th, A, b, reg=False, reg_lambda=1e-2):
     '''
     get k-th gradient for k-th log_beta
     '''
@@ -79,11 +84,16 @@ def calculate_gradient_beta(X, Y, S, log_beta, k_th, A, b):
         term_2 = - 1/2 * np.dot(inv_A[i].flatten().reshape([n**2, 1]).T, D_S_k.T.flatten().reshape([n**2, 1]))
         term_3 = - np.dot(np.dot(np.dot(b[:, i].reshape([n, 1]).T, inv_A[i]), D_S_k), np.dot(inv_A[i], b[:, i].reshape([n, 1])))
         gradient = gradient + term_1 + term_2 + term_3
-    gradient = - beta[k_th] * gradient
+    # here is the l2 regularization term
+    if reg == True:
+        term_reg = 2 * reg_lambda * beta[k_th]
+    else:
+        term_reg = 0
+    gradient = - beta[k_th] * (gradient + term_reg)
     #print(gradient.shape)
     return gradient
 
-def do_gradient_beta(X, Y, S, log_beta, A, b, Multi_b):
+def do_gradient_beta(X, Y, S, log_beta, A, b, Multi_b, reg, reg_lambda):
     '''
     gradient for beta
     '''
@@ -92,7 +102,7 @@ def do_gradient_beta(X, Y, S, log_beta, A, b, Multi_b):
     if Multi_b:
         gradient = np.zeros([n, 1])
         for i in range(0, n):
-            gradient[i] = calculate_gradient_beta(X, Y, S, log_beta, i, A, b)
+            gradient[i] = calculate_gradient_beta(X, Y, S, log_beta, i, A, b, reg, reg_lambda)
     else:    
         beta = np.exp(log_beta)
         inv_A = np.zeros([t, n, n])
@@ -192,7 +202,7 @@ def calculate_likelihood(X_t, Y_t, S_t, log_alpha, log_beta, A_t, b_t):
     return log_likelihood
     
 
-def fit_model(X, Y, S, max_iter, learn_rate, Multi_beta, init_alpha, init_beta):
+def fit_model(X, Y, S, max_iter, learn_rate, Multi_beta, init_alpha, init_beta, reg, reg_lambda):
     '''
     X: feature sets (t, n, m)
     Y: outputs (n, t)
@@ -210,7 +220,7 @@ def fit_model(X, Y, S, max_iter, learn_rate, Multi_beta, init_alpha, init_beta):
     log_alpha = init_value_alpha * np.ones([m, 1])
     Log_likelihood = -np.inf
     
-    for i in range(0, max_iter):
+    for iters in range(0, max_iter):
         Matrix_A = calculate_matrix_A(S, log_alpha, log_beta, Multi_beta)
         Matrix_b = calculate_matrix_b(X, log_alpha)
         # calculate likelihood, due to A, b will be update with following processes, so we do calculate here
@@ -222,16 +232,18 @@ def fit_model(X, Y, S, max_iter, learn_rate, Multi_beta, init_alpha, init_beta):
             A = Matrix_A[i]
             b = Matrix_b[:, i].reshape([n, 1])
             log_likelihood = log_likelihood + calculate_likelihood(X_t, Y_t, S_t, log_alpha, log_beta, A, b)
-        #print("Log_likelihood:\t%.5f" % log_likelihood)
+        print("Log_likelihood:\t%.5f" % log_likelihood)
         #print(log_likelihood.shape)
+        if log_likelihood == np.inf: # error situation
+            log_likelihood = -1e10
         if log_likelihood > Log_likelihood:
             #print("Log_likelihood:\t%.5f" % log_likelihood)
             Log_likelihood = log_likelihood
         else:
             #print("except out!")
             break
-        gradient_log_alpha = do_gradient_alpha(X, Y, S, log_alpha, Matrix_A, Matrix_b)
-        gradient_log_beta = do_gradient_beta(X, Y, S, log_beta, Matrix_A, Matrix_b, Multi_beta)
+        gradient_log_alpha = do_gradient_alpha(X, Y, S, log_alpha, Matrix_A, Matrix_b, reg, reg_lambda)
+        gradient_log_beta = do_gradient_beta(X, Y, S, log_beta, Matrix_A, Matrix_b, Multi_beta, reg, reg_lambda)
         #print(gradient_log_alpha[:, 0])
         #print(gradient_log_beta[0])
         #print("alpha:")
@@ -318,12 +330,13 @@ def build_data_x2y(X, M, tag, ar_days):
     build data that are used for the first feature function, X -> Y
     '''
     start_date = 0
-    end_date = 365*3
+    #end_date = 365*3
+    end_date = 91
     AR_days = ar_days # how many historical days are used to predict, here we take 7 days into account
     
-    X_all_1 = np.sum(X[start_date:end_date], axis=2)
+    #X_all_1 = np.sum(X[start_date:end_date], axis=2)
     
-    #X_all_1 = X.copy()
+    X_all_1 = X.copy()
     t, n = X_all_1.shape
     num_data = end_date - AR_days
     

@@ -17,6 +17,8 @@ def tuning_model(CCRF_X, CCRF_Y, CCRF_S, max_iter,
     aim to obtain the best init_alpha and init_beta value to achieve largest likelihood
     return the tuned alpha and beta for prediction
     '''
+    reg = False
+    reg_lambda = 1e6
     init_alpha = 4
     init_beta = 4
     end_alpha = 12
@@ -34,7 +36,7 @@ def tuning_model(CCRF_X, CCRF_Y, CCRF_S, max_iter,
         for beta in range(init_beta, end_beta):
             t_alpha, t_beta, log_likelihood = CCRF.fit_model(t_ccrf_x, t_ccrf_y, t_ccrf_s, 
                                                          max_iter, learn_rate, Multi_beta, 
-                                                         -alpha, -beta)
+                                                         -alpha, -beta, reg, reg_lambda)
             if log_likelihood > Log_likelihood:
                 Log_likelihood = log_likelihood
                 best_alpha = t_alpha
@@ -60,7 +62,7 @@ def clustered_CCRF_train(m_cliques, start_date, train_days, eval_days, CCRF_X, C
         if len(clique) <= 5:
             learn_rate = 1e-2
         elif len(clique) > 5:
-            learn_rate = 1e-4
+            learn_rate = 1e-6
         # training model on each clique
         print("clique\t%d\t# of instance:\t%d" %(cluster_id, len(clique)))
         alpha, beta, log_likelihood, eval_sets = tuning_model(CCRF_X[:, clique, :],
@@ -71,7 +73,7 @@ def clustered_CCRF_train(m_cliques, start_date, train_days, eval_days, CCRF_X, C
         likelihood = likelihood + log_likelihood
         Eval_sets.extend([eval_sets])
         
-    return Eval_sets, paras_alpha, paras_beta
+    return Eval_sets, paras_alpha, paras_beta, likelihood
 
 def clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days):
     
@@ -111,15 +113,18 @@ def clustered_CCRF_eval(Eval_sets, paras_alpha, paras_beta, m_cliques, eval_days
         pred_y_all[clique, :] = pred_y
     RMSE = np.sqrt(np.sum((Predicts - Reals)**2) / n / eval_days)
     RMSE_iter = np.sqrt(np.sum((pred_y_all - Reals)**2) / n / eval_days)
+    RMSE_iter_1 = np.sqrt(np.sum((pred_y_all[:, 0] - Reals[:, 0])**2) / n / 1)
+    RMSE_iter_7 = np.sqrt(np.sum((pred_y_all[:, 0:7] - Reals[:, 0:7])**2) / n / 7)
+    RMSE_iter_14 = np.sqrt(np.sum((pred_y_all[:, 0:14] - Reals[:, 0:14])**2) / n / 14)
     
-    return RMSE, RMSE_iter, Predicts, pred_y, Reals
+    return RMSE, RMSE_iter, RMSE_iter_1, RMSE_iter_7, RMSE_iter_14, Predicts, pred_y_all, Reals
 
-def cluster_tree(child_num, tree_level, similarity, m_type, is_asc):
+def cluster_tree(child_num, tree_level, similarity, m_type, is_asc, var_weight):
     
     m_cliques, m_number, m_subgraphs = tree_structure_clustering.discover_trees(similarity, 
                                                                                 child_num, 
                                                                                 tree_level, m_type, 
-                                                                                is_asc)    
+                                                                                is_asc, var_weight)    
     return m_cliques, m_subgraphs
 
 
@@ -160,9 +165,10 @@ if __name__ == "__main__":
     m_type = 0 # 0 for degree based; 1 for edge based
     simi_len = args.simi_len # used to specify the similarity between regions and then to cluster
     crime_type = ["person", "property"]
-    city_name = ["NY", "CHI"]
+    city_name = ["NY", "CHI", "BJ"]
     crime_ID = 0
     city_ID = 1
+    var_weight = 2
     
     # CCRF_S parameter
     is_fullPartial = args.is_fullPartial
@@ -175,28 +181,32 @@ if __name__ == "__main__":
     CCRF_S = np.load(path + '/data/' + city_name[city_ID] + '/sampled/' + crime_type[crime_ID] + '_s.npy')
     n = CCRF_S.shape[1]
     '''
-    
-    # build new training dataset
     path = os.getcwd()
-    X = np.load(path + '/data/' + city_name[city_ID] + '/raw/crime_record.npy')
-    M = np.load(path + '/data/' + city_name[city_ID] + '/raw/region_factors.npy')
     m_tag = 0 # not using M(region factors) as input factors
-    CCRF_X, CCRF_Y = CCRF.build_data_x2y_new(X, m_tag, AR_days)
+    if city_ID == 2:
+        X = np.load(path + '/data/' + city_name[city_ID] + '/raw/checkin_record.npy')
+        M = 0
+        CCRF_X, CCRF_Y = CCRF.build_data_x2y(X, M, m_tag, AR_days)
+    else:
+    # build new training dataset
+        X = np.load(path + '/data/' + city_name[city_ID] + '/raw/crime_record.npy')
+        M = np.load(path + '/data/' + city_name[city_ID] + '/raw/region_factors.npy')
+        CCRF_X, CCRF_Y = CCRF.build_data_x2y_new(X, m_tag, AR_days)
     n = CCRF_Y.shape[0]
     
     if is_fullPartial == 1:
-        file = open(path + '/data/results/partial/results_{}_{}.txt'.format(simi_len, eval_days), 'a+')
+        file = open(path + '/data/results/partial/10results_{}_{}.txt'.format(simi_len, eval_days), 'a+')
     else:
-        file = open(path + '/data/results/non_partial/results_{}_{}.txt'.format(simi_len, eval_days), 'a+')
+        file = open(path + '/data/results/non_partial/10results_{}_{}.txt'.format(simi_len, eval_days), 'a+')
     # evaluation on different clustering parameters
-    for child_num in range(2, 6):
-        for tree_level in range(2, 6):
+    for child_num in range(2, 4):
+        for tree_level in range(2, 4):
             print("child_num:\t%d\ttree_level:\t%d" % (child_num, tree_level))
             similarity = functions.build_data_Static_S(CCRF_Y[:, start_Date-simi_len:start_Date])
             CCRF_S = functions.transfer_static_S(similarity, CCRF_Y.shape[1])
             
-            m_cliques, m_subgraphs = cluster_tree(child_num, tree_level, similarity.copy(), m_type, is_asc)
-            m_modularity, m_graph = functions.clique_modularity(m_cliques, similarity.copy(), 2)
+            m_cliques, m_subgraphs = cluster_tree(child_num, tree_level, similarity.copy(), m_type, is_asc, var_weight)
+            m_modularity, m_graph = functions.clique_modularity(m_cliques, similarity.copy(), var_weight)
             m_entropy = functions.clique_entropy(m_cliques, CCRF_Y[:, start_Date-train_days:start_Date])
             
             if is_fullPartial == 1:
@@ -206,7 +216,7 @@ if __name__ == "__main__":
                 zero_ratio = 0
                 p_CCRF_S = CCRF_S.copy()
             
-            Eval_sets, paras_alpha, paras_beta = clustered_CCRF_train(m_cliques, start_Date, train_days, 
+            Eval_sets, paras_alpha, paras_beta, likelihood = clustered_CCRF_train(m_cliques, start_Date, train_days, 
                                                                       eval_days, CCRF_X, CCRF_Y, p_CCRF_S, lag_days)
             # P represents the predicted values
             # R represents the real values
